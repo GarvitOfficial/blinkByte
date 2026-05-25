@@ -5,7 +5,7 @@ export class BlinkByteScanner {
   constructor(videoElement, canvasElement, callbacks = {}) {
     this.video = videoElement;
     this.canvas = canvasElement;
-    this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.ctx = canvasElement.getContext('2d', { willReadFrequently: true });
     
     this.onSessionStart = callbacks.onSessionStart || (() => {});
     this.onFrameReceived = callbacks.onFrameReceived || (() => {});
