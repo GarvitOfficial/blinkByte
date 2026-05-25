@@ -32,17 +32,24 @@ export class BlinkByteScanner {
       throw new Error("Webcam access is blocked or not supported in this browser context. You MUST access this application via HTTPS (secure connection) or localhost.");
     }
 
+    let stream;
     try {
       const constraints = {
-        video: {
-          facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
+        video: { facingMode: facingMode },
         audio: false
       };
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.warn("Requested facingMode constraints failed, falling back to general camera request...", err);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      } catch (fallbackErr) {
+        throw new Error("Failed to acquire camera: please ensure you have given camera permissions, and that you are not inside an in-app browser like WhatsApp or Instagram (open in Safari/Chrome instead).");
+      }
+    }
 
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+    try {
+      this.stream = stream;
       this.video.srcObject = this.stream;
       this.video.setAttribute("playsinline", true); // required for iOS safari
       this.video.muted = true; // required for reliable autoplay on mobile browsers
