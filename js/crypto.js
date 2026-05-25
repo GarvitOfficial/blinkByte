@@ -7,6 +7,9 @@
  * @returns {Promise<CryptoKey>} The derived AES key.
  */
 async function deriveKey(passphrase, salt) {
+  if (!window.crypto || !window.crypto.subtle) {
+    throw new Error("Cryptographic operations (encryption/decryption) are only supported in secure contexts (HTTPS or localhost).");
+  }
   const encoder = new TextEncoder();
   const rawKey = encoder.encode(passphrase);
 

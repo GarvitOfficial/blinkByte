@@ -162,11 +162,16 @@ export async function createSendSession(fileBytes, fileName, mimeType, options =
     ivBase64 = btoa(String.fromCharCode(...encResult.iv));
   }
 
-  // 3. SHA-256 for E2E Integrity check
-  const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
-  const fileHashHex = Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+  // 3. E2E Integrity Check (SHA-256 fallback to CRC32 in insecure contexts)
+  let fileHashHex = "";
+  if (window.crypto && window.crypto.subtle) {
+    const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
+    fileHashHex = Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  } else {
+    fileHashHex = "crc32:" + crc32(fileBytes).toString(16).padStart(8, '0');
+  }
 
   // 4. Determine Shard counts
   const dataLen = processedData.length;
@@ -194,6 +199,7 @@ export async function createSendSession(fileBytes, fileName, mimeType, options =
     size: fileBytes.length,
     mime: mimeType || "application/octet-stream",
     hash: fileHashHex,
+    crc32: crc32(fileBytes), // Always provide CRC32 for insecure contexts (like HTTP)
     encrypted: encrypted,
     salt: saltBase64,
     iv: ivBase64,
@@ -376,14 +382,23 @@ export class ReceiveSession {
     // Decompress
     const fileBytes = await decompressData(processedData, 'gzip');
 
-    // SHA-256 Hash Integrity check
-    const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
-    const fileHashHex = Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
+    // 6. E2E Integrity Check
+    // Verify CRC32 Checksum first (always supported)
+    const reconstructedCrc = crc32(fileBytes);
+    if (this.metadata.crc32 !== undefined && reconstructedCrc !== this.metadata.crc32) {
+      throw new Error("Integrity check failed: CRC32 checksum mismatch.");
+    }
 
-    if (fileHashHex !== this.metadata.hash) {
-      throw new Error("SHA-256 verification failed. Decrypted data is corrupted.");
+    // Verify SHA-256 if available and metadata hash is not a CRC32 descriptor
+    if (this.metadata.hash && !this.metadata.hash.startsWith("crc32:") && window.crypto && window.crypto.subtle) {
+      const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
+      const fileHashHex = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+
+      if (fileHashHex !== this.metadata.hash) {
+        throw new Error("SHA-256 verification failed. Decrypted data is corrupted.");
+      }
     }
 
     this.reconstructed = true;
