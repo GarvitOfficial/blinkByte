@@ -173,25 +173,60 @@ export async function createSendSession(fileBytes, fileName, mimeType, options =
     fileHashHex = "crc32:" + crc32(fileBytes).toString(16).padStart(8, '0');
   }
 
-  // 4. Determine Shard counts
+  // 4. Segment into data shards
   const dataLen = processedData.length;
   const K = Math.ceil(dataLen / chunkSize);
-  const M = Math.max(1, Math.ceil(K * redundancyRatio));
-  const totalFrames = K + M + 1; // Metadata + Data + Parity
-
-  // Pad data payload to align with K * chunkSize
   const paddedData = new Uint8Array(K * chunkSize);
   paddedData.set(processedData);
 
-  // Segment into shards
   const dataShards = [];
   for (let i = 0; i < K; i++) {
     dataShards.push(paddedData.subarray(i * chunkSize, (i + 1) * chunkSize));
   }
 
-  // 5. Reed-Solomon Erasure Coding
-  const rs = new ReedSolomon(K, M);
-  const allShards = rs.encode(dataShards);
+  // 5. Partition into blocks (each block has <= 128 data shards to satisfy GF(2^8) Reed-Solomon limit)
+  const SHARDS_PER_BLOCK = 128;
+  const B = Math.ceil(K / SHARDS_PER_BLOCK);
+  const blockConfigs = [];
+  const frames = [];
+
+  let totalDataAndParityFrames = 0;
+  for (let b = 0; b < B; b++) {
+    const startIdx = b * SHARDS_PER_BLOCK;
+    const endIdx = Math.min(K, startIdx + SHARDS_PER_BLOCK);
+    const Kb = endIdx - startIdx;
+    const Mb = Math.max(1, Math.ceil(Kb * redundancyRatio));
+
+    blockConfigs.push({ k: Kb, m: Mb });
+    totalDataAndParityFrames += (Kb + Mb);
+  }
+
+  const totalFrames = totalDataAndParityFrames + 1; // +1 for Metadata
+
+  // Encode block by block
+  for (let b = 0; b < B; b++) {
+    const startIdx = b * SHARDS_PER_BLOCK;
+    const { k: Kb, m: Mb } = blockConfigs[b];
+    const blockShards = dataShards.slice(startIdx, startIdx + Kb);
+
+    // Run Reed-Solomon over this block
+    const rs = new ReedSolomon(Kb, Mb);
+    const allBlockShards = rs.encode(blockShards); // returns Kb + Mb shards
+
+    // Data frames: seqNum carries block index in upper 8 bits, relative shard index in lower 8 bits
+    for (let i = 0; i < Kb; i++) {
+      const seqNum = (b << 8) | i;
+      const dataFrame = new Frame(2, sessionId, seqNum, totalFrames, allBlockShards[i]);
+      frames.push(dataFrame.serialize());
+    }
+
+    // Parity frames
+    for (let j = 0; j < Mb; j++) {
+      const seqNum = (b << 8) | (Kb + j);
+      const parityFrame = new Frame(3, sessionId, seqNum, totalFrames, allBlockShards[Kb + j]);
+      frames.push(parityFrame.serialize());
+    }
+  }
 
   // 6. Build Metadata payload (Chunk 0)
   const metadata = {
@@ -204,24 +239,18 @@ export async function createSendSession(fileBytes, fileName, mimeType, options =
     salt: saltBase64,
     iv: ivBase64,
     k: K,
-    m: M,
+    m: totalDataAndParityFrames - K,
     chunkSize: chunkSize,
-    originalCompressedLen: dataLen
+    originalCompressedLen: dataLen,
+    shardsPerBlock: SHARDS_PER_BLOCK,
+    blockConfigs: blockConfigs
   };
 
   const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
   const metadataFrame = new Frame(1, sessionId, 0, totalFrames, metadataBytes);
 
-  // 7. Serialize all frames
-  const frames = [metadataFrame.serialize()];
-  for (let i = 0; i < K; i++) {
-    const dataFrame = new Frame(2, sessionId, i + 1, totalFrames, allShards[i]);
-    frames.push(dataFrame.serialize());
-  }
-  for (let i = 0; i < M; i++) {
-    const parityFrame = new Frame(3, sessionId, K + i + 1, totalFrames, allShards[K + i]);
-    frames.push(parityFrame.serialize());
-  }
+  // Unshift metadata frame to the front
+  frames.unshift(metadataFrame.serialize());
 
   return {
     sessionId,
@@ -238,6 +267,7 @@ export class ReceiveSession {
     this.sessionId = sessionId;
     this.metadata = null;
     this.frames = {}; // seqNum -> Frame
+    this.blockBuffers = {}; // blockIdx -> shardIdx -> Frame
     this.reconstructed = false;
   }
 
@@ -258,6 +288,14 @@ export class ReceiveSession {
       } catch (err) {
         console.error("Failed to parse metadata", err);
       }
+    } else if (frame.type === 2 || frame.type === 3) {
+      const blockIdx = frame.seqNum >>> 8;
+      const shardIdx = frame.seqNum & 0xFF;
+
+      if (!this.blockBuffers[blockIdx]) {
+        this.blockBuffers[blockIdx] = {};
+      }
+      this.blockBuffers[blockIdx][shardIdx] = frame;
     }
     return true;
   }
@@ -283,17 +321,24 @@ export class ReceiveSession {
     }
 
     const K = this.metadata.k;
-    const M = this.metadata.m;
-    const totalFrames = K + M + 1;
+    const blockConfigs = this.metadata.blockConfigs || [];
+    const totalFrames = blockConfigs.reduce((sum, b) => sum + b.k + b.m, 0) + 1;
 
     let shardsReceived = 0;
-    for (let i = 1; i <= K + M; i++) {
-      if (this.frames[i]) {
-        shardsReceived++;
+    let shardsNeeded = K;
+
+    for (let b = 0; b < blockConfigs.length; b++) {
+      const block = this.blockBuffers[b] || {};
+      const { k: Kb, m: Mb } = blockConfigs[b];
+
+      for (let i = 0; i < Kb + Mb; i++) {
+        if (block[i]) {
+          shardsReceived++;
+        }
       }
     }
 
-    const percent = Math.min(100, Math.floor((shardsReceived / K) * 100));
+    const percent = Math.min(100, Math.floor((shardsReceived / shardsNeeded) * 100));
 
     return {
       hasMetadata,
@@ -301,7 +346,7 @@ export class ReceiveSession {
       totalCount: totalFrames,
       percent,
       shardsReceived,
-      shardsNeeded: K
+      shardsNeeded
     };
   }
 
@@ -313,17 +358,27 @@ export class ReceiveSession {
     if (!this.metadata) return false;
     if (this.reconstructed) return false;
 
-    const K = this.metadata.k;
-    const M = this.metadata.m;
+    const blockConfigs = this.metadata.blockConfigs || [];
+    if (blockConfigs.length === 0) return false;
 
-    let shardCount = 0;
-    for (let i = 1; i <= K + M; i++) {
-      if (this.frames[i]) {
-        shardCount++;
+    // Reconstructable only if every block has at least its data shards (K_b)
+    for (let b = 0; b < blockConfigs.length; b++) {
+      const block = this.blockBuffers[b] || {};
+      const { k: Kb, m: Mb } = blockConfigs[b];
+
+      let count = 0;
+      for (let i = 0; i < Kb + Mb; i++) {
+        if (block[i]) {
+          count++;
+        }
+      }
+
+      if (count < Kb) {
+        return false;
       }
     }
 
-    return shardCount >= K;
+    return true;
   }
 
   /**
@@ -337,36 +392,52 @@ export class ReceiveSession {
     }
 
     const K = this.metadata.k;
-    const M = this.metadata.m;
     const chunkSize = this.metadata.chunkSize;
     const originalCompressedLen = this.metadata.originalCompressedLen;
+    const blockConfigs = this.metadata.blockConfigs;
 
-    // Build the inputs for Reed-Solomon
-    const shards = [];
-    const shardPresent = [];
+    const B = blockConfigs.length;
+    const reconstructedBlocks = [];
 
-    for (let i = 1; i <= K + M; i++) {
-      const frame = this.frames[i];
-      if (frame) {
-        shards.push(frame.payload);
-        shardPresent.push(true);
-      } else {
-        shards.push(new Uint8Array(chunkSize));
-        shardPresent.push(false);
+    // Reconstruct each block independently
+    for (let b = 0; b < B; b++) {
+      const { k: Kb, m: Mb } = blockConfigs[b];
+      const block = this.blockBuffers[b];
+
+      const shards = [];
+      const shardPresent = [];
+
+      for (let i = 0; i < Kb + Mb; i++) {
+        const frame = block[i];
+        if (frame) {
+          shards.push(frame.payload);
+          shardPresent.push(true);
+        } else {
+          shards.push(new Uint8Array(chunkSize));
+          shardPresent.push(false);
+        }
       }
+
+      const rs = new ReedSolomon(Kb, Mb);
+      const decodedShards = rs.decode(shards, shardPresent);
+
+      const blockBytes = new Uint8Array(Kb * chunkSize);
+      for (let i = 0; i < Kb; i++) {
+        blockBytes.set(decodedShards[i], i * chunkSize);
+      }
+
+      reconstructedBlocks.push(blockBytes);
     }
 
-    // Decode shards
-    const rs = new ReedSolomon(K, M);
-    const decodedShards = rs.decode(shards, shardPresent);
-
-    // Concatenate K decoded shards
-    const combinedBytes = new Uint8Array(K * chunkSize);
-    for (let i = 0; i < K; i++) {
-      combinedBytes.set(decodedShards[i], i * chunkSize);
+    // Recombine blocks
+    const totalLen = reconstructedBlocks.reduce((sum, arr) => sum + arr.length, 0);
+    const combinedBytes = new Uint8Array(totalLen);
+    let offset = 0;
+    for (let b = 0; b < B; b++) {
+      combinedBytes.set(reconstructedBlocks[b], offset);
+      offset += reconstructedBlocks[b].length;
     }
 
-    // Slice to exact compressed length (discard padding)
     let processedData = combinedBytes.subarray(0, originalCompressedLen);
 
     // Decrypt (Optional)
