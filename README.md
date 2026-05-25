@@ -1,4 +1,4 @@
-# BlinkByte // Futuristic Offline Optical Data Transfer
+# BlinkByte [UNDER DEVELOPMENT]
 
 BlinkByte is a futuristic, offline optical data transfer system that transmits files, text, images, and clipboard content between devices using animated QR code sequences and real-time camera scanning.
 
