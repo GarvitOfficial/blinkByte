@@ -45,14 +45,15 @@ export class BlinkByteScanner {
       this.stream = await navigator.mediaDevices.getUserMedia(constraints);
       this.video.srcObject = this.stream;
       this.video.setAttribute("playsinline", true); // required for iOS safari
+      this.video.muted = true; // required for reliable autoplay on mobile browsers
       
-      // Wait for video metadata to load
-      await new Promise((resolve) => {
-        this.video.onloadedmetadata = () => {
-          this.video.play();
-          resolve();
-        };
-      });
+      // Play the video stream and wait for it to start
+      try {
+        await this.video.play();
+      } catch (playError) {
+        console.warn("Direct video play promise failed, attempting fallback play() call", playError);
+        this.video.play();
+      }
 
       this.active = true;
       this.activeSession = null;
