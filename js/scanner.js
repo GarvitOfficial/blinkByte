@@ -28,6 +28,10 @@ export class BlinkByteScanner {
   async start(facingMode = 'environment') {
     if (this.active) return true;
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("Webcam access is blocked or not supported in this browser context. You MUST access this application via HTTPS (secure connection) or localhost.");
+    }
+
     try {
       const constraints = {
         video: {
