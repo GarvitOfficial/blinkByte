@@ -1,4 +1,7 @@
-// Browser-native Cryptography utilizing Web Crypto API
+// Isomorphic Cryptography utilizing Web Crypto API
+// Resolves to window.crypto in browsers and globalThis.crypto in Node.js
+
+const webCrypto = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
 
 /**
  * Derives an AES-GCM key from a passphrase and a salt using PBKDF2.
@@ -7,14 +10,14 @@
  * @returns {Promise<CryptoKey>} The derived AES key.
  */
 async function deriveKey(passphrase, salt) {
-  if (!window.crypto || !window.crypto.subtle) {
+  if (!webCrypto || !webCrypto.subtle) {
     throw new Error("Cryptographic operations (encryption/decryption) are only supported in secure contexts (HTTPS or localhost).");
   }
   const encoder = new TextEncoder();
   const rawKey = encoder.encode(passphrase);
 
   // Import the raw passphrase as a key base
-  const keyMaterial = await window.crypto.subtle.importKey(
+  const keyMaterial = await webCrypto.subtle.importKey(
     "raw",
     rawKey,
     { name: "PBKDF2" },
@@ -23,7 +26,7 @@ async function deriveKey(passphrase, salt) {
   );
 
   // Derive the 256-bit AES-GCM key
-  return await window.crypto.subtle.deriveKey(
+  return await webCrypto.subtle.deriveKey(
     {
       name: "PBKDF2",
       salt: salt,
@@ -44,14 +47,17 @@ async function deriveKey(passphrase, salt) {
  * @returns {Promise<{salt: Uint8Array, iv: Uint8Array, ciphertext: Uint8Array}>}
  */
 export async function encryptPayload(data, passphrase) {
+  if (!webCrypto) {
+    throw new Error("Cryptography API is not available on this context.");
+  }
   try {
     // Generate secure random salt (16 bytes) and IV (12 bytes)
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const salt = webCrypto.getRandomValues(new Uint8Array(16));
+    const iv = webCrypto.getRandomValues(new Uint8Array(12));
 
     const key = await deriveKey(passphrase, salt);
 
-    const encryptedBuffer = await window.crypto.subtle.encrypt(
+    const encryptedBuffer = await webCrypto.subtle.encrypt(
       {
         name: "AES-GCM",
         iv: iv,
@@ -81,10 +87,13 @@ export async function encryptPayload(data, passphrase) {
  * @returns {Promise<Uint8Array>} Decrypted plain bytes.
  */
 export async function decryptPayload(ciphertext, passphrase, salt, iv) {
+  if (!webCrypto) {
+    throw new Error("Cryptography API is not available on this context.");
+  }
   try {
     const key = await deriveKey(passphrase, salt);
 
-    const decryptedBuffer = await window.crypto.subtle.decrypt(
+    const decryptedBuffer = await webCrypto.subtle.decrypt(
       {
         name: "AES-GCM",
         iv: iv,

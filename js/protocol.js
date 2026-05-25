@@ -44,7 +44,7 @@ function writeU32(arr, offset, val) {
 }
 
 function readU32(arr, offset) {
-  return ((arr[offset] << 24) >>> 0) | (arr[offset + 1] << 16) | (arr[offset + 2] << 8) | arr[offset + 3];
+  return (((arr[offset] << 24) | (arr[offset + 1] << 16) | (arr[offset + 2] << 8) | arr[offset + 3]) >>> 0);
 }
 
 export class Frame {
@@ -164,8 +164,9 @@ export async function createSendSession(fileBytes, fileName, mimeType, options =
 
   // 3. E2E Integrity Check (SHA-256 fallback to CRC32 in insecure contexts)
   let fileHashHex = "";
-  if (window.crypto && window.crypto.subtle) {
-    const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
+  const webCrypto = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
+  if (webCrypto && webCrypto.subtle) {
+    const hashBuffer = await webCrypto.subtle.digest("SHA-256", fileBytes);
     fileHashHex = Array.from(new Uint8Array(hashBuffer))
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
@@ -461,8 +462,9 @@ export class ReceiveSession {
     }
 
     // Verify SHA-256 if available and metadata hash is not a CRC32 descriptor
-    if (this.metadata.hash && !this.metadata.hash.startsWith("crc32:") && window.crypto && window.crypto.subtle) {
-      const hashBuffer = await window.crypto.subtle.digest("SHA-256", fileBytes);
+    const webCrypto = typeof window !== 'undefined' ? window.crypto : globalThis.crypto;
+    if (this.metadata.hash && !this.metadata.hash.startsWith("crc32:") && webCrypto && webCrypto.subtle) {
+      const hashBuffer = await webCrypto.subtle.digest("SHA-256", fileBytes);
       const fileHashHex = Array.from(new Uint8Array(hashBuffer))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
