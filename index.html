@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="BlinkByte - A futuristic offline optical data transfer system using animated QR codes. AirDrop for fully offline, air-gapped devices.">
+  <title>BlinkByte // Offline Optical Data Transfer</title>
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Load Local Static Libraries (Strictly offline-compatible) -->
+  <script src="libs/qrcode.min.js"></script>
+  <script src="libs/jsQR.js"></script>
+</head>
+<body>
+
+  <div class="app-container">
+    <header>
+      <h1 class="brand-title" id="main-title">BlinkByte</h1>
+      <p class="brand-tagline">Offline. Optical. Instant.</p>
+    </header>
+
+    <main class="panels-grid">
+      <!-- SENDER PANEL (TRANSMIT) -->
+      <section class="cyber-card" id="sender-panel">
+        <h2 class="card-title card-title-send">
+          <span class="icon"></span>
+          Transmit System
+        </h2>
+
+        <!-- Initial File Input State -->
+        <div id="send-init-state">
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-icon">⇪</div>
+            <p class="dropzone-text">DRAG & DROP DATA FILES</p>
+            <p class="dropzone-subtext">or click to select file/image/text</p>
+            <input type="file" id="file-input">
+          </div>
+
+          <!-- Clipboard Fast Paste Option -->
+          <div class="form-group" style="text-align: center; margin-top: -0.5rem; margin-bottom: 1.5rem;">
+            <label>— OR TRANSFER CLIPBOARD DATA —</label>
+            <button class="cyber-btn" id="btn-paste-clipboard" style="padding: 0.5rem; font-size: 0.8rem; border-color: rgba(255, 0, 127, 0.4); color: var(--text-main);">
+              Paste from Clipboard
+            </button>
+          </div>
+        </div>
+
+        <!-- Selected File HUD -->
+        <div class="file-hud" id="file-hud" style="display: none;">
+          <div class="file-hud-info">
+            <span class="file-name" id="file-hud-name">file_name.bin</span>
+            <span class="file-size" id="file-hud-size">0 KB</span>
+          </div>
+          <button class="file-remove" id="btn-remove-file" title="Remove File">×</button>
+        </div>
+
+        <!-- Advanced settings toggle -->
+        <button class="settings-toggle" id="settings-toggle">
+          <span>▶</span> Advanced Protocol Configurations
+        </button>
+
+        <!-- Advanced settings contents -->
+        <div class="settings-content" id="settings-content">
+          <div class="form-group">
+            <label for="param-fps">Target Frame Rate (FPS)</label>
+            <input type="number" class="cyber-input" id="param-fps" value="10" min="1" max="30">
+          </div>
+          <div class="form-group">
+            <label for="param-chunk-size">QR Version Density</label>
+            <select class="cyber-input" id="param-chunk-size">
+              <option value="128">128 bytes (Version 8 - Sparse)</option>
+              <option value="256" selected>256 bytes (Version 11 - Balanced)</option>
+              <option value="384">384 bytes (Version 14 - Dense)</option>
+              <option value="512">512 bytes (Version 18 - Ultra-Dense)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="param-redundancy">Reed-Solomon Redundancy</label>
+            <select class="cyber-input" id="param-redundancy">
+              <option value="0.1">10% FEC (Minimum)</option>
+              <option value="0.2">20% FEC (Light)</option>
+              <option value="0.3" selected>30% FEC (Recommended)</option>
+              <option value="0.4">40% FEC (Heavy)</option>
+              <option value="0.5">50% FEC (Extreme)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="param-passphrase">Optional Encryption Password</label>
+            <input type="password" class="cyber-input" id="param-passphrase" placeholder="Passphrase (AES-256)">
+          </div>
+        </div>
+
+        <!-- Action triggers -->
+        <button class="cyber-btn cyber-btn-send" id="btn-start-send" disabled>
+          Initialize Transmission
+        </button>
+
+        <!-- Transmission State (QR Stream) -->
+        <div class="qr-stream-container" id="qr-stream-container">
+          <div class="qr-canvas-wrapper">
+            <canvas class="qr-stream-canvas" id="qr-canvas"></canvas>
+          </div>
+
+          <!-- Diagnostics overlay -->
+          <div class="diagnostics-hud">
+            <div class="hud-row">
+              <span class="hud-label">SESSION ID</span>
+              <span class="hud-value pink" id="hud-send-session">0x00000000</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">FRAME INDEX</span>
+              <span class="hud-value" id="hud-send-frame">0 / 0</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">STREAMING SPEED</span>
+              <span class="hud-value" id="hud-send-speed">10 FPS</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">FEC CONFIG</span>
+              <span class="hud-value" id="hud-send-fec">30% RS</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">SECURITY ENVELOPE</span>
+              <span class="hud-value" id="hud-send-security">PLAIN</span>
+            </div>
+          </div>
+
+          <button class="cyber-btn" id="btn-stop-send" style="border-color: rgba(255,255,255,0.2); color: var(--text-muted);">
+            Terminate Stream
+          </button>
+        </div>
+      </section>
+
+      <!-- RECEIVER PANEL (RECEIVE) -->
+      <section class="cyber-card" id="receiver-panel">
+        <h2 class="card-title card-title-receive">
+          <span class="icon"></span>
+          Receiver Pipeline
+        </h2>
+
+        <!-- Active Scanning HUD -->
+        <div id="receive-scanning-state" style="display: flex; flex-direction: column; flex-grow: 1;">
+          <div class="scanner-viewport-wrapper">
+            <video class="scanner-video" id="scanner-video" autoplay playsinline></video>
+            <canvas class="hidden-canvas" id="scanner-hidden-canvas"></canvas>
+            <div class="scanner-overlay">
+              <div class="scanner-target-box">
+                <div class="scanner-laser-line"></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; align-items: center;">
+            <div class="status-pill idle" id="scanner-status-pill">
+              <span class="indicator-dot"></span>
+              <span id="scanner-status-text">OFFLINE</span>
+            </div>
+            <button class="cyber-btn" id="btn-toggle-camera" style="width: auto; padding: 0.3rem 0.75rem; font-size: 0.75rem; font-family: var(--font-mono); border-color: rgba(0, 240, 255, 0.3);">
+              Toggle Facing Mode
+            </button>
+          </div>
+
+          <button class="cyber-btn" id="btn-start-scan">
+            Activate Camera Scanner
+          </button>
+          <button class="cyber-btn" id="btn-stop-scan" style="display: none; border-color: rgba(255,255,255,0.2); color: var(--text-muted);">
+            Deactivate Camera
+          </button>
+
+          <!-- Receive Diagnostics HUD -->
+          <div class="diagnostics-hud" id="receive-diagnostics" style="margin-top: 1.5rem; display: none;">
+            <div class="hud-row">
+              <span class="hud-label">ACTIVE SESSION</span>
+              <span class="hud-value" id="hud-recv-session">0x00000000</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">SHARDS GATHERED</span>
+              <span class="hud-value green" id="hud-recv-shards">0 / 0</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">SUCCESS PROBABILITY</span>
+              <span class="hud-value" id="hud-recv-progress">0%</span>
+            </div>
+            <div class="hud-row">
+              <span class="hud-label">EST. SPEED / TIME</span>
+              <span class="hud-value" id="hud-recv-time">N/A</span>
+            </div>
+          </div>
+
+          <!-- Reception Sector Grid -->
+          <div class="packet-grid-wrapper" id="packet-grid-wrapper" style="display: none;">
+            <div class="packet-grid-title">
+              <span>Sector Index Map</span>
+              <span id="hud-recv-ratio">0 / 0</span>
+            </div>
+            <div class="packet-grid" id="packet-grid">
+              <!-- Nodes populated dynamically by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Successful Reconstruction Panel -->
+        <div id="receive-success-state" style="display: none; flex-direction: column; align-items: center; justify-content: center; flex-grow: 1;">
+          <div class="success-card">
+            <div class="success-icon">✓</div>
+            <h3 class="success-title">INTEGRITY CHECK SUCCESSFUL</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">Original SHA-256 match validated.</p>
+            <div class="success-file-details">
+              <div class="hud-row">
+                <span class="hud-label">FILE NAME</span>
+                <span class="hud-value" id="success-file-name" style="color: var(--neon-green);">file.txt</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">PAYLOAD SIZE</span>
+                <span class="hud-value" id="success-file-size">0 KB</span>
+              </div>
+              <div class="hud-row">
+                <span class="hud-label">MIME TYPE</span>
+                <span class="hud-value" id="success-file-mime">text/plain</span>
+              </div>
+            </div>
+            <button class="cyber-btn" id="btn-download-file" style="border-color: var(--neon-green); color: var(--neon-green); margin-bottom: 1rem;">
+              Download Reconstructed File
+            </button>
+            <button class="cyber-btn" id="btn-reset-receive" style="border-color: rgba(255,255,255,0.2); color: var(--text-muted);">
+              Reset Pipeline & Scan New
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>BlinkByte // Futuristic Optical Transport Layer // Powered by Web Cryptography & Reed-Solomon FEC</p>
+      <p style="margin-top: 0.25rem; font-size: 0.65rem; opacity: 0.5;">
+        Designed by <a href="https://github.com/GarvitOfficial" target="_blank">GarvitOfficial</a>
+      </p>
+    </footer>
+  </div>
+
+  <!-- PASSWORD PROMPT MODAL -->
+  <div class="modal-overlay" id="password-modal">
+    <div class="modal-card">
+      <div class="modal-header">Decryption Key Required</div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          This optical stream is protected by AES-256-GCM. Please input the passphrase to decrypt the payload.
+        </p>
+        <div class="form-group">
+          <label for="decrypt-passphrase">Security Key / Passphrase</label>
+          <input type="password" class="cyber-input" id="decrypt-passphrase" placeholder="Passphrase">
+        </div>
+        <p id="decrypt-error" style="color: var(--neon-pink); font-size: 0.8rem; margin-top: 0.5rem; display: none; font-family: var(--font-mono);">
+          Incorrect security key or checksum corrupted.
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button class="cyber-btn modal-btn" id="btn-confirm-decrypt" style="border-color: var(--neon-green); color: var(--neon-green);">
+          Decrypt Payload
+        </button>
+        <button class="cyber-btn modal-btn modal-btn-cancel" id="btn-cancel-decrypt">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main logic module entry -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

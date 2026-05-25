@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlinkByte // Protocol Test Suite</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    body {
+      padding: 2rem;
+    }
+    .test-suite-card {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .test-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+    }
+    .test-name {
+      color: var(--text-main);
+    }
+    .test-status {
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .test-status.passed {
+      color: var(--neon-green);
+      text-shadow: var(--glow-green);
+    }
+    .test-status.failed {
+      color: var(--neon-pink);
+      text-shadow: var(--glow-pink);
+    }
+    .console-log {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 1rem;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="test-suite-card cyber-card">
+    <h2 class="card-title card-title-receive">
+      <span class="icon"></span>
+      Protocol Core Test Suite
+    </h2>
+    
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;">
+      Validates Galois Field arithmetic, Cauchy Reed-Solomon correction matrices, AES-256-GCM encryption, compression stream, and binary packet checksums.
+    </p>
+
+    <div id="test-results">
+      <!-- Test runs populated dynamically -->
+      <div style="text-align: center; color: var(--neon-cyan); padding: 2rem;">
+        INITIALIZING CORE TEST RUN...
+      </div>
+    </div>
+
+    <div class="console-log" id="test-console">
+      [SYSTEM READY] Initiating logs...
+    </div>
+
+    <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+      <a href="../index.html" class="cyber-btn" style="text-align: center; text-decoration: none; border-color: rgba(255, 255, 255, 0.2); color: var(--text-muted);">
+        Return to Application
+      </a>
+      <button class="cyber-btn" onclick="window.location.reload();" style="border-color: var(--neon-cyan); color: var(--neon-cyan);">
+        Rerun Diagnostics
+      </button>
+    </div>
+  </div>
+
+  <script type="module" src="test.js"></script>
+</body>
+</html>
